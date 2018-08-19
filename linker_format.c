@@ -268,9 +268,10 @@ static int log_vprint(int prio, const char *tag, const char *fmt, va_list  args)
     static int log_fd = -1;
 
     result = vformat_buffer(buf, sizeof buf, fmt, args);
-
+    printf("%s",buf);
+#if 0
     if (log_fd < 0) {
-        log_fd = open("/dev/alog/main", O_WRONLY);
+        log_fd = fileno(stderr);//open("/dev/alog/main", O_WRONLY);
         if (log_fd < 0) {
             log_fd = fileno(stdout); // kernel doesn't have android log
             return result;
@@ -293,6 +294,8 @@ static int log_vprint(int prio, const char *tag, const char *fmt, va_list  args)
         } while ((ret < 0) && (errno == EINTR));
     }
     return result;
+#endif;
+    return 0;
 }
 
 #define  __libc_android_log_vprint  log_vprint
