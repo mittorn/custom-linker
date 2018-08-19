@@ -390,6 +390,9 @@ static Elf_Sym *_elf_lookup(soinfo *si, unsigned hash, const char *name)
     const char *strtab = si->strtab;
     unsigned n;
 
+    if( !si->nbucket )
+        return NULL;
+
     TRACE_TYPE(LOOKUP, "%5d SEARCH %s in %s@0x%08x %08x %d\n", pid,
                name, si->name, si->base, hash, hash % si->nbucket);
     n = hash % si->nbucket;
@@ -463,8 +466,8 @@ _do_lookup(soinfo *si, const char *name, unsigned *base)
         if(d[0] == DT_NEEDED){
             lsi = (soinfo *)d[1];
             if (!validate_soinfo(lsi)) {
-                DL_ERR("%5d bad DT_NEEDED pointer in %s",
-                       pid, si->name);
+//                DL_ERR("%5d bad DT_NEEDED pointer in %s",
+//                       pid, si->name);
                 return NULL;
             }
 
@@ -1351,7 +1354,7 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
                 s = &symtab[sym];
                 if (ELF32_ST_BIND(s->st_info) != STB_WEAK && strcmp(si->name, "libdsyscalls.so") != 0) {
                     DL_ERR("%5d cannot locate '%s'...\n", pid, sym_name);
-                    return -1;
+                    //return -1;
                 }
 
                 /* IHI0044C AAELF 4.5.1.1:
@@ -1605,8 +1608,8 @@ void call_constructors_recursive(soinfo *si)
             if(d[0] == DT_NEEDED){
                 soinfo* lsi = (soinfo *)d[1];
                 if (!validate_soinfo(lsi)) {
-                    DL_ERR("%5d bad DT_NEEDED pointer in %s",
-                           pid, si->name);
+//                    DL_ERR("%5d bad DT_NEEDED pointer in %s",
+//                           pid, si->name);
                 } else {
                     call_constructors_recursive(lsi);
                 }
@@ -1941,7 +1944,8 @@ static int link_image(soinfo *si, unsigned wr_offset)
                 strlcpy(tmp_err_buf, linker_get_error(), sizeof(tmp_err_buf));
                 DL_ERR("%5d could not load needed library '%s' for '%s' (%s)",
                        pid, si->strtab + d[1], si->name, tmp_err_buf);
-                goto fail;
+                //goto fail;
+                continue;
             }
             /* Save the soinfo of the loaded DT_NEEDED library in the payload
                of the DT_NEEDED entry itself, so that we can retrieve the
