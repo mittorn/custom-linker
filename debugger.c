@@ -42,8 +42,12 @@
 
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <signal.h>
+#define offsetof(x,y) &((x*)0)->y
 
-extern int tgkill(int tgid, int tid, int sig);
 
 void notify_gdb_of_libraries();
 
@@ -113,7 +117,7 @@ static int socket_abstract_client(const char *name, int type)
 }
 
 #include "linker_format.h"
-#include <../libc/private/logd.h>
+//#include <../libc/private/logd.h>
 
 /*
  * Writes a summary of the signal to the log file.
@@ -148,9 +152,10 @@ static void logSignalSummary(int signum, const siginfo_t* info)
     }
     format_buffer(buffer, sizeof(buffer),
         "Fatal signal %d (%s) at 0x%08x (code=%d), thread %d (%s)",
-        signum, signame, info->si_addr, info->si_code, gettid(), threadname);
+        signum, signame, info->si_addr, info->si_code, syscall(SYS_gettid), threadname);
 
-    __libc_android_log_write(ANDROID_LOG_FATAL, "libc", buffer);
+    //__libc_android_log_write(ANDROID_LOG_FATAL, "libc", buffer);
+    puts(buffer);
 }
 
 /*
@@ -165,7 +170,7 @@ void debugger_signal_handler(int n, siginfo_t* info, void* unused)
 
     logSignalSummary(n, info);
 
-    tid = gettid();
+    tid = syscall(SYS_gettid);;
     s = socket_abstract_client(DEBUGGER_SOCKET_NAME, SOCK_STREAM);
 
     if (s >= 0) {
@@ -192,7 +197,8 @@ void debugger_signal_handler(int n, siginfo_t* info, void* unused)
             /* read or write failed -- broken connection? */
             format_buffer(msgbuf, sizeof(msgbuf),
                 "Failed while talking to debuggerd: %s", strerror(errno));
-            __libc_android_log_write(ANDROID_LOG_FATAL, "libc", msgbuf);
+//            __libc_android_log_write(ANDROID_LOG_FATAL, "libc", msgbuf);
+puts(msgbuf);
         }
 
         close(s);
@@ -200,7 +206,8 @@ void debugger_signal_handler(int n, siginfo_t* info, void* unused)
         /* socket failed; maybe process ran out of fds */
         format_buffer(msgbuf, sizeof(msgbuf),
             "Unable to open connection to debuggerd: %s", strerror(errno));
-        __libc_android_log_write(ANDROID_LOG_FATAL, "libc", msgbuf);
+//        __libc_android_log_write(ANDROID_LOG_FATAL, "libc", msgbuf);
+puts(msgbuf);
     }
 
     /* remove our net so we fault for real when we return */
@@ -218,7 +225,7 @@ void debugger_signal_handler(int n, siginfo_t* info, void* unused)
         case SIGFPE:
         case SIGPIPE:
         case SIGSTKFLT:
-            (void) tgkill(getpid(), gettid(), n);
+            (void) syscall(SYS_tgkill, getpid(), syscall(SYS_gettid), n);
             break;
         default:    // SIGILL, SIGBUS, SIGSEGV
             break;
