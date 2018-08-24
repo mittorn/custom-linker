@@ -128,6 +128,8 @@ struct soinfo
 
     const char *strtab;
     Elf_Sym *symtab;
+    unsigned int symsize;
+    unsigned int strsize;
 
     unsigned nbucket;
     unsigned nchain;

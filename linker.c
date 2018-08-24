@@ -390,8 +390,29 @@ static Elf_Sym *_elf_lookup(soinfo *si, unsigned hash, const char *name)
     const char *strtab = si->strtab;
     unsigned n;
 
-    if( !si->nbucket )
+    if( !si->nbucket ) // no DT_HASH
+    {
+        for(s = symtab + 1; 1; s++){
+
+            if( s->st_name > si->strsize )
+                return NULL;
+            if(strcmp(strtab + s->st_name, name)) continue;
+
+                /* only concern ourselves with global and weak symbol definitions */
+            switch(ELF32_ST_BIND(s->st_info)){
+            case STB_GLOBAL:
+            case STB_WEAK:
+                    /* no section == undefined */
+                if(s->st_shndx == 0) continue;
+
+                TRACE_TYPE(LOOKUP, "%5d FOUND %s in %s (%08x) %d\n", pid,
+                           name, si->name, s->st_value, s->st_size);
+                return s;
+            }
+        }
         return NULL;
+    }
+
 
     TRACE_TYPE(LOOKUP, "%5d SEARCH %s in %s@0x%08x %08x %d\n", pid,
                name, si->name, si->base, hash, hash % si->nbucket);
@@ -1315,6 +1336,80 @@ unsigned unload_library(soinfo *si)
     return si->refcount;
 }
 
+#define MAX_NUM_STUBS 1024
+static struct stubprint_s
+{
+int pos;
+char *extcode;
+char names[MAX_NUM_STUBS][32];
+} stubprint;
+
+
+static void  __attribute__((force_align_arg_pointer)) stubprint_func(int i)
+{
+    printf("Stub function called: %s\n", stubprint.names[i]);
+}
+
+static int stubprint_thunk[] = {0xbeefb855, 0xe589dead, 0x6814ec83, 0xcafebaad, 0xc483d0ff, 0x00c3c910};
+
+//  0:   55                      push   %ebp
+//  1:   b8 ef be ad de          mov    $0xdeadbeef,%eax
+//  6:   89 e5                   mov    %esp,%ebp
+//  8:   83 ec 14                sub    $0x14,%esp
+//  b:   68 ad ba fe ca          push   $0xcafebaad
+// 10:   ff d0                   call   *%eax
+// 12:   83 c4 10                add    $0x10,%esp
+// 15:   c9                      leave
+// 16:   c3                      ret
+
+#define STUB_TARGET_ADDR_OFFSET 2
+#define STUB_ARG_OFFSET 12
+#define MAX_STUB_SIZE 24
+
+static void __attribute__((force_align_arg_pointer)) stubprint_fallback()
+{
+  printf("Called stub function!\n");
+#ifdef __GLIBC__
+  Dl_info info;
+  void *trace[32];
+  backtrace_symbols_fd(trace, backtrace(trace, 32), 1);
+  int ret = dladdr(trace[1], &info);
+  if( ret )
+    printf("%s\n", info.dli_sname);
+#endif
+}
+
+
+static void* add_stub(const char *library, const char *name)
+{
+    void* answ;
+#ifdef __i386__
+    if (stubprint.pos >= MAX_NUM_STUBS) {
+      return (void*)stubprint_fallback;
+    }
+    if (!stubprint.extcode) // initialize
+    {
+        int addr = (int)&stubprint_func;
+
+        stubprint.extcode = mmap(NULL, MAX_NUM_STUBS * MAX_STUB_SIZE,
+                PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        memcpy( ((char*)stubprint_thunk) + STUB_TARGET_ADDR_OFFSET, &addr, 4); // replace 0xdeadbeef placeholder
+    }
+
+    snprintf( stubprint.names[stubprint.pos], 31, "%s:%s", library, name );
+
+    answ = stubprint.extcode + stubprint.pos * MAX_STUB_SIZE;
+    memcpy(answ, stubprint_thunk, MAX_STUB_SIZE);
+    memcpy(answ + STUB_ARG_OFFSET, &stubprint.pos, 4); // replace 0xcafebaad placeholder
+    stubprint.pos++;
+
+    return answ;
+#else
+    return (void*)stubprint_fallback;
+#endif
+}
+
+
 /* TODO: don't use unsigned for addrs below. It works, but is not
  * ideal. They should probably be either uint32_t, Elf_Addr, or unsigned
  * long.
@@ -1354,6 +1449,7 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
                 s = &symtab[sym];
                 if (ELF32_ST_BIND(s->st_info) != STB_WEAK && strcmp(si->name, "libdsyscalls.so") != 0) {
                     DL_ERR("%5d cannot locate '%s'...\n", pid, sym_name);
+                    sym_addr = add_stub(si->name, sym_name);
                     //return -1;
                 }
 
@@ -1835,6 +1931,12 @@ static int link_image(soinfo *si, unsigned wr_offset)
             break;
         case DT_SYMTAB:
             si->symtab = (Elf_Sym *) (si->base + *d);
+            break;
+        case DT_SYMENT:
+            si->symsize = *d;
+            break;
+        case DT_STRSZ:
+            si->strsize = *d;
             break;
         case DT_PLTREL:
             if(*d != DT_REL) {
