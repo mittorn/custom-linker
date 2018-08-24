@@ -13,6 +13,7 @@ case $SYMS2 in
 case $s in
 _Jv_RegisterClasses|__gmon_start__|_ITM_registerTMCloneTable|_ITM_deregisterTMCloneTable) ;;
 curl*|__asan_*|__ubsan_*|*UTIL_*|*RuneLocale*);;
+#__*_finite|__curbrk|___brk_addr|__write|__*_chk|_strtod_internal|__strtod_internal|__finitef) ;; # musl
 __ctype_tolower|__ctype_toupper|__ctype_b);;
 *) echo extern char "$s"\;if\(\!my_strcmp\(name,\""$s"\"\)\)return \&"$s"\; >> lookup_gen.c
 ;;
