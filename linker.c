@@ -634,6 +634,7 @@ static int _open_lib(const char *name)
 }
 
 static void parse_library_path(const char *path, char *delim);
+static void parse_preloads(const char *path, char *delim);
 
 static int open_library(const char *name)
 {
@@ -656,17 +657,6 @@ static int open_library(const char *name)
 
     if ((name[0] == '/') && ((fd = _open_lib(name)) >= 0))
         return fd;
-
-#ifdef DEFAULT_HYBRIS_LD_LIBRARY_PATH
-    if (getenv("HYBRIS_LD_LIBRARY_PATH") == NULL && *ldpaths == 0)
-    {
-        parse_library_path(DEFAULT_HYBRIS_LD_LIBRARY_PATH, ":");
-    }
-#endif
-    if (getenv("HYBRIS_LD_LIBRARY_PATH") != NULL && *ldpaths == 0)
-    {
-        parse_library_path(getenv("HYBRIS_LD_LIBRARY_PATH"), ":");
-    }
 
     for (path = ldpaths; *path; path++) {
         n = format_buffer(buf, sizeof(buf), "%s/%s", *path, name);
@@ -1409,6 +1399,7 @@ static void* add_stub(const char *library, const char *name)
 #endif
 }
 
+static char faketls[1024];
 
 /* TODO: don't use unsigned for addrs below. It works, but is not
  * ideal. They should probably be either uint32_t, Elf_Addr, or unsigned
@@ -1478,6 +1469,10 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
                 case R_386_GLOB_DAT:
                 case R_386_32:
                 case R_386_RELATIVE:    /* Dont' care. */
+                case R_386_IRELATIVE:
+                case R_386_TLS_DTPMOD32:
+                case R_386_TLS_DTPOFF32:
+                case R_386_TLS_TPOFF:
 #endif /* ANDROID_*_LINKER */
                     /* sym_addr was initialized to be zero above or relocation
                        code below does not care about value of sym_addr.
@@ -1571,6 +1566,7 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
         case R_ARM_RELATIVE:
 #elif defined(ANDROID_X86_LINKER)
         case R_386_RELATIVE:
+        case R_386_IRELATIVE:
 #endif /* ANDROID_*_LINKER */
             COUNT_RELOC(RELOC_RELATIVE);
             MARK(rel->r_offset);
@@ -1601,6 +1597,12 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
                        (sym_addr - reloc), sym_addr, reloc, sym_name);
             *((unsigned *)reloc) += (unsigned)(sym_addr - reloc);
             break;
+        case R_386_TLS_TPOFF:
+        case R_386_TLS_DTPMOD32:
+        case R_386_TLS_DTPOFF32:
+
+            *((unsigned *)reloc) += (unsigned)(faketls - reloc);
+            break;
 #endif /* ANDROID_X86_LINKER */
 
 #ifdef ANDROID_ARM_LINKER
@@ -1618,7 +1620,7 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
         default:
             DL_ERR("%5d unknown reloc type %d @ %p (%d)",
                   pid, type, rel, (int) (rel - start));
-            return -1;
+            //return -1;
         }
         rel++;
     }
@@ -1716,7 +1718,10 @@ void call_constructors_recursive(soinfo *si)
     if (si->init_func) {
         TRACE("[ %5d Calling init_func @ 0x%08x for '%s' ]\n", pid,
               (unsigned)si->init_func, si->name);
-        si->init_func();
+        if( strcmp(si->name, "libc.so.6"))
+            si->init_func();
+        else
+            WARN("skipping glibc init\n");
         TRACE("[ %5d Done calling init_func for '%s' ]\n", pid, si->name);
     }
 
@@ -2450,11 +2455,39 @@ unsigned __linker_init(unsigned **elfdata) {
     return __linker_init_post_relocation(elfdata);
 }
 
+
+
 #ifdef WANT_ARM_TRACING
 void android_linker_init(int sdk_version, void *(get_hooked_symbol)(const char*, const char*), void *(create_wrapper)(const char*, void*, int)) {
 #else
 void android_linker_init(int sdk_version, void *(get_hooked_symbol)(const char*, const char*)) {
 #endif
    (void) sdk_version;
+
+#ifdef DEFAULT_LD_LIBRARY_PATH
+    if (getenv("CUSTOM_LD_LIBRARY_PATH") == NULL )
+    {
+        parse_library_path(DEFAULT_LD_LIBRARY_PATH, ":");
+    }
+#endif
+    if (getenv("CUSTOM_LD_LIBRARY_PATH") )
+    {
+        parse_library_path(getenv("CUSTOM_LD_LIBRARY_PATH"), ":");
+    }
+
+    if( getenv("CUSTOM_LD_PRELOAD") )
+        parse_preloads(getenv("CUSTOM_LD_PRELOAD"), ":");
    _get_hooked_symbol = get_hooked_symbol;
+   /*load all of the preloads now */
+   int i;
+  // memset(preloads, 0, sizeof(preloads));
+   for(i = 0; ldpreload_names[i] != NULL; i++) {
+       soinfo *lsi = find_library(ldpreload_names[i]);
+       if(lsi == 0) {
+           strlcpy(tmp_err_buf, linker_get_error(), sizeof(tmp_err_buf));
+           continue;
+       }
+       lsi->refcount++;
+       preloads[i] = lsi;
+   }
 }

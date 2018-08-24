@@ -1,2 +1,5 @@
 #define _GNU_SOURCE
 #define LINKER_DEBUG 1
+#define ANDROID_X86_LINKER
+
+#define DEFAULT_LD_LIBRARY_PATH "."

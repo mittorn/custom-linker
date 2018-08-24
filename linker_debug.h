@@ -30,7 +30,6 @@
 #define _LINKER_DEBUG_H_
 
 #include <stdio.h>
-#include "config.h"
 
 #ifndef LINKER_DEBUG
 #error LINKER_DEBUG should be defined to either 1 or 0 in Android.mk

@@ -104,6 +104,7 @@ typedef struct soinfo soinfo;
 #define FLAG_ERROR      0x00000002
 #define FLAG_EXE        0x00000004 // The main executable
 #define FLAG_LINKER     0x00000010 // The linker itself
+#define FLAG_STATIC_EXE 0x00000020 // Read-only exe
 
 #define SOINFO_NAME_LEN 128
 
@@ -195,7 +196,11 @@ extern soinfo libdl_info;
 #define R_386_GLOB_DAT   6
 #define R_386_JUMP_SLOT  7
 #define R_386_RELATIVE   8
+#define R_386_TLS_TPOFF 14
+#define R_386_TLS_DTPMOD32 35
+#define R_386_TLS_DTPOFF32 36
 
+#define R_386_IRELATIVE 42
 #endif
 
 #ifndef DT_INIT_ARRAY
