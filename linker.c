@@ -28,8 +28,9 @@
 
 #include "config.h"
 
+#if 0
 #include <linux/auxvec.h>
-
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2179,7 +2180,7 @@ static void parse_preloads(const char *path, char *delim)
         ldpreload_names[i] = NULL;
     }
 }
-
+#if 0
 /*
  * This code is called after the linker has linked itself and
  * fixed it's own GOT. It is safe to make references to externs
@@ -2454,7 +2455,7 @@ unsigned __linker_init(unsigned **elfdata) {
     // the main part of the linker now.
     return __linker_init_post_relocation(elfdata);
 }
-
+#endif
 
 
 #ifdef WANT_ARM_TRACING

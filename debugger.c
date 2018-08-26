@@ -43,12 +43,21 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#ifdef __linux__
 #include <sys/syscall.h>
+#endif
 #include <sys/types.h>
 #include <signal.h>
 #define offsetof(x,y) &((x*)0)->y
 
-
+int sys_gettid()
+{
+#ifdef __linux__
+return syscall(SYS_gettid);
+#else
+return 0;
+#endif
+}
 void notify_gdb_of_libraries();
 
 #define DEBUGGER_SOCKET_NAME "android:debuggerd"
@@ -129,7 +138,7 @@ static int socket_abstract_client(const char *name, int type)
 static void logSignalSummary(int signum, const siginfo_t* info)
 {
     char buffer[128];
-    char threadname[MAX_TASK_NAME_LEN + 1]; // one more for termination
+    char threadname[MAX_TASK_NAME_LEN + 1] = "unk"; // one more for termination
 
     char* signame;
     switch (signum) {
@@ -142,7 +151,7 @@ static void logSignalSummary(int signum, const siginfo_t* info)
         case SIGPIPE:   signame = "SIGPIPE";    break;
         default:        signame = "???";        break;
     }
-
+#ifdef __linux__
     if (prctl(PR_GET_NAME, (unsigned long)threadname, 0, 0, 0) != 0) {
         strcpy(threadname, "<name unknown>");
     } else {
@@ -150,9 +159,10 @@ static void logSignalSummary(int signum, const siginfo_t* info)
         // implies that 16 byte names are not.
         threadname[MAX_TASK_NAME_LEN] = 0;
     }
+#endif
     format_buffer(buffer, sizeof(buffer),
         "Fatal signal %d (%s) at 0x%08x (code=%d), thread %d (%s)",
-        signum, signame, info->si_addr, info->si_code, syscall(SYS_gettid), threadname);
+        signum, signame, info->si_addr, info->si_code, sys_gettid(), threadname);
 
     //__libc_android_log_write(ANDROID_LOG_FATAL, "libc", buffer);
     puts(buffer);
@@ -170,7 +180,8 @@ void debugger_signal_handler(int n, siginfo_t* info, void* unused)
 
     logSignalSummary(n, info);
 
-    tid = syscall(SYS_gettid);;
+    tid = sys_gettid();;
+#ifdef __linux__
     s = socket_abstract_client(DEBUGGER_SOCKET_NAME, SOCK_STREAM);
 
     if (s >= 0) {
@@ -230,6 +241,7 @@ puts(msgbuf);
         default:    // SIGILL, SIGBUS, SIGSEGV
             break;
     }
+#endif
 }
 
 void debugger_init()
