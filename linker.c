@@ -52,6 +52,36 @@
 #include "linker_environ.h"
 #include "linker_format.h"
 
+#if defined (__aarch64__)
+
+#define R_GENERIC_JUMP_SLOT R_AARCH64_JUMP_SLOT
+#define R_GENERIC_GLOB_DAT  R_AARCH64_GLOB_DAT
+#define R_GENERIC_RELATIVE  R_AARCH64_RELATIVE
+#define R_GENERIC_IRELATIVE R_AARCH64_IRELATIVE
+
+#elif defined (__arm__)
+
+#define R_GENERIC_JUMP_SLOT R_ARM_JUMP_SLOT
+#define R_GENERIC_GLOB_DAT  R_ARM_GLOB_DAT
+#define R_GENERIC_RELATIVE  R_ARM_RELATIVE
+#define R_GENERIC_IRELATIVE R_ARM_IRELATIVE
+
+#elif defined (__i386__)
+
+#define R_GENERIC_JUMP_SLOT R_386_JMP_SLOT
+#define R_GENERIC_GLOB_DAT  R_386_GLOB_DAT
+#define R_GENERIC_RELATIVE  R_386_RELATIVE
+#define R_GENERIC_IRELATIVE R_386_IRELATIVE
+
+#elif defined (__x86_64__)
+
+#define R_GENERIC_JUMP_SLOT R_X86_64_JUMP_SLOT
+#define R_GENERIC_GLOB_DAT  R_X86_64_GLOB_DAT
+#define R_GENERIC_RELATIVE  R_X86_64_RELATIVE
+#define R_GENERIC_IRELATIVE R_X86_64_IRELATIVE
+
+#endif
+
 #define ALLOW_SYMBOLS_FROM_MAIN 1
 #define SO_MAX 128
 
@@ -1402,6 +1432,7 @@ static void* add_stub(const char *library, const char *name)
 
 static char faketls[1024];
 
+
 /* TODO: don't use unsigned for addrs below. It works, but is not
  * ideal. They should probably be either uint32_t, Elf_Addr, or unsigned
  * long.
@@ -1411,16 +1442,18 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
     Elf_Sym *symtab = si->symtab;
     const char *strtab = si->strtab;
     Elf_Sym *s;
-    unsigned base;
+    Elf_Addr base;
     Elf_Rel *start = rel;
-    unsigned idx;
+    size_t idx;
 
     for (idx = 0; idx < count; ++idx) {
         unsigned type = ELF32_R_TYPE(rel->r_info);
         unsigned sym = ELF32_R_SYM(rel->r_info);
-        unsigned reloc = (unsigned)(rel->r_offset + si->base);
-        unsigned sym_addr = 0;
-        char *sym_name = NULL;
+        Elf_Addr reloc = (Elf_Addr)(rel->r_offset + si->base);
+        Elf_Addr addend = type == R_GENERIC_RELATIVE || type == R_GENERIC_IRELATIVE ? *(Elf_Addr*)reloc:0;
+        Elf_Addr sym_addr = 0;
+
+        const char *sym_name = NULL;
 
         DEBUG("%5d Processing '%s' relocation at index %d\n", pid,
               si->name, idx);
@@ -1458,33 +1491,37 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
                      type is base-relative.
                   */
 
-                switch (type) {
-#if defined(ANDROID_ARM_LINKER)
-                case R_ARM_JUMP_SLOT:
-                case R_ARM_GLOB_DAT:
+        switch (type) {
+                case R_GENERIC_JUMP_SLOT:
+                case R_GENERIC_GLOB_DAT:
+                case R_GENERIC_RELATIVE:
+                case R_GENERIC_IRELATIVE:
+#if defined(__aarch64__)
+                case R_AARCH64_ABS64:
+                case R_AARCH64_ABS32:
+                case R_AARCH64_ABS16:
+#elif defined(__x86_64__)
+                case R_X86_64_32:
+                case R_X86_64_64:
+#elif defined(__arm__)
                 case R_ARM_ABS32:
-                case R_ARM_RELATIVE:    /* Don't care. */
-                case R_ARM_NONE:        /* Don't care. */
-#elif defined(ANDROID_X86_LINKER)
-                case R_386_JUMP_SLOT:
-                case R_386_GLOB_DAT:
+#elif defined(__i386__)
                 case R_386_32:
-                case R_386_RELATIVE:    /* Dont' care. */
-                case R_386_IRELATIVE:
-                case R_386_TLS_DTPMOD32:
-                case R_386_TLS_DTPOFF32:
-                case R_386_TLS_TPOFF:
-#endif /* ANDROID_*_LINKER */
+#endif
                     /* sym_addr was initialized to be zero above or relocation
                        code below does not care about value of sym_addr.
                        No need to do anything.  */
                     break;
 
-#if defined(ANDROID_X86_LINKER)
-                case R_386_PC32:
-                    sym_addr = reloc;
-                    break;
-#endif /* ANDROID_X86_LINKER */
+#if defined(__x86_64__)
+          case R_X86_64_PC32:
+            sym_addr = reloc;
+            break;
+#elif defined(__i386__)
+          case R_386_PC32:
+            sym_addr = reloc;
+            break;
+#endif
 
 #if defined(ANDROID_ARM_LINKER)
                 case R_ARM_COPY:
@@ -1494,7 +1531,7 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
                 default:
                     DL_ERR("%5d unknown weak reloc type %d @ %p (%d)\n",
                                  pid, type, rel, (int) (rel - start));
-                    return -1;
+                    //return -1;
                 }
             } else {
                 /* We got a definition.  */
@@ -1517,112 +1554,278 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
  * different files.
  */
         switch(type){
-#if defined(ANDROID_ARM_LINKER)
-        case R_ARM_JUMP_SLOT:
-            COUNT_RELOC(RELOC_ABSOLUTE);
-            MARK(rel->r_offset);
-            TRACE_TYPE(RELO, "%5d RELO JMP_SLOT %08x <- %08x %s\n", pid,
-                       reloc, sym_addr, sym_name);
-            *((unsigned*)reloc) = sym_addr;
-            break;
-        case R_ARM_GLOB_DAT:
-            COUNT_RELOC(RELOC_ABSOLUTE);
-            MARK(rel->r_offset);
-            TRACE_TYPE(RELO, "%5d RELO GLOB_DAT %08x <- %08x %s\n", pid,
-                       reloc, sym_addr, sym_name);
-            *((unsigned*)reloc) = sym_addr;
-            break;
-        case R_ARM_ABS32:
-            COUNT_RELOC(RELOC_ABSOLUTE);
-            MARK(rel->r_offset);
-            TRACE_TYPE(RELO, "%5d RELO ABS %08x <- %08x %s\n", pid,
-                       reloc, sym_addr, sym_name);
-            *((unsigned*)reloc) += sym_addr;
-            break;
-        case R_ARM_REL32:
-            COUNT_RELOC(RELOC_RELATIVE);
-            MARK(rel->r_offset);
-            TRACE_TYPE(RELO, "%5d RELO REL32 %08x <- %08x - %08x %s\n", pid,
-                       reloc, sym_addr, rel->r_offset, sym_name);
-            *((unsigned*)reloc) += sym_addr - rel->r_offset;
-            break;
-#elif defined(ANDROID_X86_LINKER)
-        case R_386_JUMP_SLOT:
-            COUNT_RELOC(RELOC_ABSOLUTE);
-            MARK(rel->r_offset);
-            TRACE_TYPE(RELO, "%5d RELO JMP_SLOT %08x <- %08x %s\n", pid,
-                       reloc, sym_addr, sym_name);
-            *((unsigned*)reloc) = sym_addr;
-            break;
-        case R_386_GLOB_DAT:
-            COUNT_RELOC(RELOC_ABSOLUTE);
-            MARK(rel->r_offset);
-            TRACE_TYPE(RELO, "%5d RELO GLOB_DAT %08x <- %08x %s\n", pid,
-                       reloc, sym_addr, sym_name);
-            *((unsigned*)reloc) = sym_addr;
-            break;
-#endif /* ANDROID_*_LINKER */
 
-#if defined(ANDROID_ARM_LINKER)
-        case R_ARM_RELATIVE:
-#elif defined(ANDROID_X86_LINKER)
-        case R_386_RELATIVE:
-        case R_386_IRELATIVE:
-#endif /* ANDROID_*_LINKER */
-            COUNT_RELOC(RELOC_RELATIVE);
+        case R_GENERIC_JUMP_SLOT:
+            COUNT_RELOC(RELOC_ABSOLUTE);
             MARK(rel->r_offset);
-            if(sym){
-                DL_ERR("%5d odd RELATIVE form...", pid);
+            TRACE_TYPE(RELO, "%5d RELO JMP_SLOT %08x <- %08x %s\n", pid,
+                       reloc, sym_addr, sym_name);
+            *((unsigned*)reloc) = sym_addr;
+            break;
+        case R_GENERIC_GLOB_DAT:
+            COUNT_RELOC(RELOC_ABSOLUTE);
+            MARK(rel->r_offset);
+            TRACE_TYPE(RELO, "%5d RELO GLOB_DAT %08x <- %08x %s\n", pid,
+                       reloc, sym_addr, sym_name);
+            *((unsigned*)reloc) = sym_addr;
+            break;
+        case R_GENERIC_RELATIVE:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO RELATIVE %16p <- %16p\n",
+                           (void*)(reloc),
+                           (void*)(si->base + addend));
+                *(Elf_Addr*)(reloc) = (si->base + addend);
+                break;
+              case R_GENERIC_IRELATIVE:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO IRELATIVE %16p <- %16p\n",
+                            (void*)(reloc),
+                            (void*)(si->base + addend));
+                {
+        #if !defined(__LP64__)
+                  // When relocating dso with text_relocation .text segment is
+                  // not executable. We need to restore elf flags for this
+                  // particular call.
+#if 0
+                  if (has_text_relocations) {
+                    if (phdr_table_protect_segments(phdr, phnum, base) < 0) {
+                      DL_ERR("can't protect segments for \"%s\": %s",
+                             get_realpath(), strerror(errno));
+                      return -1;
+                    }
+                  }
+#endif
+        #endif
+                  Elf_Addr ifunc_addr = ((Elf_Addr (*)())(si->base + addend))();
+        #if !defined(__LP64__)
+#if 0
+                  // Unprotect it afterwards...
+                  if (has_text_relocations) {
+                    if (phdr_table_unprotect_segments(phdr, phnum, base) < 0) {
+                      DL_ERR("can't unprotect loadable segments for \"%s\": %s",
+                             get_realpath(), strerror(errno));
+                      return -1;
+                    }
+                  }
+#endif
+        #endif
+                  *(Elf_Addr*)(reloc) = ifunc_addr;
+                }
+                break;
+
+        #if defined(__aarch64__)
+              case R_AARCH64_ABS64:
+                COUNT_RELOC(RELOC_ABSOLUTE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO ABS64 %16" PRIx64 " <- %16" PRIx64 " %s\n",
+                           reloc, sym_addr + addend, sym_name);
+                *(Elf_Addr*)(reloc) = sym_addr + addend;
+                break;
+              case R_AARCH64_ABS32:
+                COUNT_RELOC(RELOC_ABSOLUTE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO ABS32 %16" PRIx64 " <- %16" PRIx64 " %s\n",
+                           reloc, sym_addr + addend, sym_name);
+                {
+                  const Elf_Addr min_value = (Elf_Addr)(INT32_MIN);
+                  const Elf_Addr max_value = (Elf_Addr)(UINT32_MAX);
+                  if ((min_value <= (sym_addr + addend)) &&
+                      ((sym_addr + addend) <= max_value)) {
+                    *(Elf_Addr*)(reloc) = sym_addr + addend;
+                  } else {
+                    DL_ERR("0x%016" PRIx64 " out of range 0x%016" PRIx64 " to 0x%016" PRIx64,
+                           sym_addr + addend, min_value, max_value);
+                    return -1;
+                  }
+                }
+                break;
+              case R_AARCH64_ABS16:
+                COUNT_RELOC(RELOC_ABSOLUTE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO ABS16 %16" PRIx64 " <- %16" PRIx64 " %s\n",
+                           reloc, sym_addr + addend, sym_name);
+                {
+                  const Elf_Addr min_value = (Elf_Addr)(INT16_MIN);
+                  const Elf_Addr max_value = (Elf_Addr)(UINT16_MAX);
+                  if ((min_value <= (sym_addr + addend)) &&
+                      ((sym_addr + addend) <= max_value)) {
+                    *(Elf_Addr*)(reloc) = (sym_addr + addend);
+                  } else {
+                    DL_ERR("0x%016" PRIx64 " out of range 0x%016" PRIx64 " to 0x%016" PRIx64,
+                           sym_addr + addend, min_value, max_value);
+                    return -1;
+                  }
+                }
+                break;
+              case R_AARCH64_PREL64:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO REL64 %16" PRIx64 " <- %16" PRIx64 " - %16" PRIx64 " %s\n",
+                           reloc, sym_addr + addend, rel->r_offset, sym_name);
+                *(Elf_Addr*)(reloc) = sym_addr + addend - rel->r_offset;
+                break;
+              case R_AARCH64_PREL32:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO REL32 %16" PRIx64 " <- %16" PRIx64 " - %16" PRIx64 " %s\n",
+                           reloc, sym_addr + addend, rel->r_offset, sym_name);
+                {
+                  const Elf_Addr min_value = (Elf_Addr)(INT32_MIN);
+                  const Elf_Addr max_value = (Elf_Addr)(UINT32_MAX);
+                  if ((min_value <= (sym_addr + addend - rel->r_offset)) &&
+                      ((sym_addr + addend - rel->r_offset) <= max_value)) {
+                    *(Elf_Addr*)(reloc) = sym_addr + addend - rel->r_offset;
+                  } else {
+                    DL_ERR("0x%016" PRIx64 " out of range 0x%016" PRIx64 " to 0x%016" PRIx64,
+                           sym_addr + addend - rel->r_offset, min_value, max_value);
+                    return -1;
+                  }
+                }
+                break;
+              case R_AARCH64_PREL16:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO REL16 %16" PRIx64 " <- %16" PRIx64 " - %16" PRIx64 " %s\n",
+                           reloc, sym_addr + addend, rel->r_offset, sym_name);
+                {
+                  const Elf_Addr min_value = (Elf_Addr)(INT16_MIN);
+                  const Elf_Addr max_value = (Elf_Addr)(UINT16_MAX);
+                  if ((min_value <= (sym_addr + addend - rel->r_offset)) &&
+                      ((sym_addr + addend - rel->r_offset) <= max_value)) {
+                    *(Elf_Addr*)(reloc) = sym_addr + addend - rel->r_offset;
+                  } else {
+                    DL_ERR("0x%016" PRIx64 " out of range 0x%016" PRIx64 " to 0x%016" PRIx64,
+                           sym_addr + addend - rel->r_offset, min_value, max_value);
+                    return -1;
+                  }
+                }
+                break;
+
+              case R_AARCH64_COPY:
+                /*
+                 * ET_EXEC is not supported so this should not happen.
+                 *
+                 * http://infocenter.arm.com/help/topic/com.arm.doc.ihi0056b/IHI0056B_aaelf64.pdf
+                 *
+                 * Section 4.6.11 "Dynamic relocations"
+                 * R_AARCH64_COPY may only appear in executable objects where e_type is
+                 * set to ET_EXEC.
+                 */
+                DL_ERR("%s R_AARCH64_COPY relocations are not supported", get_realpath());
                 return -1;
+              case R_AARCH64_TLS_TPREL64:
+                TRACE_TYPE(RELO, "RELO TLS_TPREL64 *** %16" PRIx64 " <- %16" PRIx64 " - %16llx\n",
+                           reloc, (sym_addr + addend), rel->r_offset);
+                break;
+              case R_AARCH64_TLS_DTPREL32:
+                TRACE_TYPE(RELO, "RELO TLS_DTPREL32 *** %16" PRIx64 " <- %16" PRIx64 " - %16llx\n",
+                           reloc, (sym_addr + addend), rel->r_offset);
+                break;
+        #elif defined(__x86_64__)
+              case R_X86_64_32:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO R_X86_64_32 %08zx <- +%08zx %s", (size_t)(reloc),
+                           (size_t)(sym_addr), sym_name);
+                *(Elf32_Addr*)(reloc) = sym_addr + addend;
+                break;
+              case R_X86_64_64:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO R_X86_64_64 %08zx <- +%08zx %s", (size_t)(reloc),
+                           (size_t)(sym_addr), sym_name);
+                *(Elf64_Addr*)(reloc) = sym_addr + addend;
+                break;
+              case R_X86_64_PC32:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO R_X86_64_PC32 %08zx <- +%08zx (%08zx - %08zx) %s",
+                           (size_t)(reloc), (size_t)(sym_addr - reloc),
+                           (size_t)(sym_addr), (size_t)(reloc), sym_name);
+                *(Elf32_Addr*)(reloc) = sym_addr + addend - reloc;
+                break;
+        #elif defined(__arm__)
+              case R_ARM_ABS32:
+                COUNT_RELOC(RELOC_ABSOLUTE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO ABS %08x <- %08x %s", reloc, sym_addr, sym_name);
+                *(Elf_Addr*)(reloc) += sym_addr;
+                break;
+              case R_ARM_REL32:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO REL32 %08x <- %08x - %08x %s",
+                           reloc, sym_addr, rel->r_offset, sym_name);
+                *(Elf_Addr*)(reloc) += sym_addr - rel->r_offset;
+                break;
+              case R_ARM_COPY:
+                /*
+                 * ET_EXEC is not supported so this should not happen.
+                 *
+                 * http://infocenter.arm.com/help/topic/com.arm.doc.ihi0044d/IHI0044D_aaelf.pdf
+                 *
+                 * Section 4.6.1.10 "Dynamic relocations"
+                 * R_ARM_COPY may only appear in executable objects where e_type is
+                 * set to ET_EXEC.
+                 */
+        #ifdef ENABLE_NON_PIE_SUPPORT
+                if (allow_non_pie(get_realpath())) {
+                  if ((flags_ & FLAG_EXE) == 0) {
+                    DL_ERR("%s R_ARM_COPY relocations only supported for ET_EXEC", get_realpath());
+                    return -1;
+                  }
+                  COUNT_RELOC(RELOC_COPY);
+                  MARK(rel->r_offset);
+                  TRACE_TYPE(RELO, "RELO %08x <- %d @ %08x %s", reloc, s->st_size, sym_addr, sym_name);
+                  if (reloc == sym_addr) {
+                    const ElfW(Sym)* src = nullptr;
+
+                    if (!soinfo_do_lookup(NULL, sym_name, vi, &lsi, global_group, local_group, &src)) {
+                      DL_ERR("%s R_ARM_COPY relocation source cannot be resolved", get_realpath());
+                      return -1;
+                    }
+                    if (lsi->has_DT_SYMBOLIC) {
+                      DL_ERR("%s invalid R_ARM_COPY relocation against DT_SYMBOLIC shared "
+                             "library %s (built with -Bsymbolic?)", get_realpath(), lsi->soname_);
+                      return -1;
+                    }
+                    if (s->st_size < src->st_size) {
+                      DL_ERR("%s R_ARM_COPY relocation size mismatch (%d < %d)",
+                             get_realpath(), s->st_size, src->st_size);
+                      return -1;
+                    }
+                    memcpy((void*)(reloc),
+                           (void*)(src->st_value + lsi->load_bias), src->st_size);
+                  } else {
+                    DL_ERR("%s R_ARM_COPY relocation target cannot be resolved", get_realpath());
+                    return -1;
+                  }
+                  break;
+                }
+        #endif
+                DL_ERR("%s R_ARM_COPY relocations are not supported", get_realpath());
+            //    return -1;
+        #elif defined(__i386__)
+              case R_386_32:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO R_386_32 %08x <- +%08x %s", reloc, sym_addr, sym_name);
+                *(Elf_Addr*)(reloc) += sym_addr;
+                break;
+              case R_386_PC32:
+                COUNT_RELOC(RELOC_RELATIVE);
+                MARK(rel->r_offset);
+                TRACE_TYPE(RELO, "RELO R_386_PC32 %08x <- +%08x (%08x - %08x) %s",
+                           reloc, (sym_addr - reloc), sym_addr, reloc, sym_name);
+                *(Elf_Addr*)(reloc) += (sym_addr - reloc);
+                break;
+        #endif
+              default:
+                DL_ERR("unknown reloc type %d @ %p (%zu)", type, rel, idx);
+             //   return -1;
             }
-            TRACE_TYPE(RELO, "%5d RELO RELATIVE %08x <- +%08x\n", pid,
-                       reloc, si->base);
-            *((unsigned*)reloc) += si->base;
-            break;
-
-#if defined(ANDROID_X86_LINKER)
-        case R_386_32:
-            COUNT_RELOC(RELOC_RELATIVE);
-            MARK(rel->r_offset);
-
-            TRACE_TYPE(RELO, "%5d RELO R_386_32 %08x <- +%08x %s\n", pid,
-                       reloc, sym_addr, sym_name);
-            *((unsigned *)reloc) += (unsigned)sym_addr;
-            break;
-
-        case R_386_PC32:
-            COUNT_RELOC(RELOC_RELATIVE);
-            MARK(rel->r_offset);
-            TRACE_TYPE(RELO, "%5d RELO R_386_PC32 %08x <- "
-                       "+%08x (%08x - %08x) %s\n", pid, reloc,
-                       (sym_addr - reloc), sym_addr, reloc, sym_name);
-            *((unsigned *)reloc) += (unsigned)(sym_addr - reloc);
-            break;
-        case R_386_TLS_TPOFF:
-        case R_386_TLS_DTPMOD32:
-        case R_386_TLS_DTPOFF32:
-
-            *((unsigned *)reloc) += (unsigned)(faketls - reloc);
-            break;
-#endif /* ANDROID_X86_LINKER */
-
-#ifdef ANDROID_ARM_LINKER
-        case R_ARM_COPY:
-            COUNT_RELOC(RELOC_COPY);
-            MARK(rel->r_offset);
-            TRACE_TYPE(RELO, "%5d RELO %08x <- %d @ %08x %s\n", pid,
-                       reloc, s->st_size, sym_addr, sym_name);
-            memcpy((void*)reloc, (void*)sym_addr, s->st_size);
-            break;
-        case R_ARM_NONE:
-            break;
-#endif /* ANDROID_ARM_LINKER */
-
-        default:
-            DL_ERR("%5d unknown reloc type %d @ %p (%d)",
-                  pid, type, rel, (int) (rel - start));
-            //return -1;
-        }
         rel++;
     }
     return 0;
