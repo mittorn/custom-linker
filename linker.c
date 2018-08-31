@@ -952,6 +952,7 @@ load_segments(int fd, void *header, soinfo *si)
 
     si->wrprotect_start = 0xffffffff;
     si->wrprotect_end = 0;
+    si->entry = ehdr->e_entry;
 
     TRACE("[ %5d - Begin loading segments for '%s' @ 0x%08x ]\n",
           pid, si->name, (unsigned)si->base);

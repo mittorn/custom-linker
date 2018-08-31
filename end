@@ -1,3 +1,5 @@
+extern char my__libc_start_main;if(!my_strcmp(name,"__libc_start_main"))return &my__libc_start_main;
+
 return 0;
 }
 
