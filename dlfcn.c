@@ -24,8 +24,8 @@ typedef struct
   const char *dli_sname;        /* Name of nearest symbol.  */
   void *dli_saddr;              /* Exact value of nearest symbol.  */
 } Dl_info;
-# define RTLD_DEFAULT   ((void *) 0)
-
+#define RTLD_DEFAULT   ((void *) 0)
+#define RTLD_NEXT ((unsigned long)-1)
 
 #include <pthread.h>
 #include <stdio.h>

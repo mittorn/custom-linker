@@ -37,7 +37,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <dlfcn.h>
+//#include <dlfcn.h>
 #include <sys/stat.h>
 
 #include <pthread.h>
@@ -952,6 +952,7 @@ load_segments(int fd, void *header, soinfo *si)
     unsigned char *extra_base;
     unsigned extra_len;
     unsigned total_sz = 0;
+    unsigned remapped = 0;
 
     si->wrprotect_start = 0xffffffff;
     si->wrprotect_end = 0;
@@ -979,7 +980,39 @@ load_segments(int fd, void *header, soinfo *si)
                 DL_ERR("%d failed to map segment from '%s' @ 0x%08x (0x%08x). "
                       "p_vaddr=0x%08x p_offset=0x%08x", pid, si->name,
                       (unsigned)tmp, len, phdr->p_vaddr, phdr->p_offset);
-                goto fail;
+
+                // fallback for systems with mmap limitations
+                // alloc writable region at beginning of binary
+                if(!remapped)
+                {
+                    if( si->base )
+                    munmap(si->base, si->size);
+                    
+                    void *newbase = si->base? si->base: phdr->p_vaddr;
+                    void *map = mmap( newbase, si->size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_ANONYMOUS|MAP_PRIVATE|MAP_FIXED, -1, 0);
+                    if( map == MAP_FAILED )
+                        map = mmap( ((unsigned)newbase) & 0xFFFF0000, (si->size + 0xFFFF) & 0xFFFF0000, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_ANONYMOUS|MAP_PRIVATE|MAP_FIXED, -1, 0);
+                    if( map == MAP_FAILED )
+                        map = mmap( newbase, si->size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+                    else
+                        map = newbase;
+                    if( si->base )
+                        si->base = base = map;
+                    pbase = tmp = base + (phdr->p_vaddr & (~PAGE_MASK));
+                    DL_ERR("mmap fallback: allocated entire region %p %d\n", map, si->size );
+                    remapped = 1;
+                }
+                
+                if(remapped) // when it allocated, read file
+                {
+                    pbase = tmp;
+                    DL_ERR("mmap fallback: reading region %p %d\n", pbase, len);
+                    //printf("mmap returned bad address %x %x\n", tmp, pbase);
+                    lseek(fd,  phdr->p_offset & (~PAGE_MASK), SEEK_SET);
+                    read(fd, pbase, len);
+                    lseek(fd,  0, SEEK_SET);
+                }
+                //goto fail;
             }
 
             /* If 'len' didn't end on page boundary, and it's a writable
@@ -1016,7 +1049,7 @@ load_segments(int fd, void *header, soinfo *si)
              */
             tmp = (Elf_Addr)(((unsigned)pbase + len + PAGE_SIZE - 1) &
                                     (~PAGE_MASK));
-            if (tmp < (base + phdr->p_vaddr + phdr->p_memsz)) {
+            if ( !remapped && (tmp < (base + phdr->p_vaddr + phdr->p_memsz))) {
                 extra_len = base + phdr->p_vaddr + phdr->p_memsz - tmp;
                 TRACE("[ %5d - Need to extend segment from '%s' @ 0x%08x "
                       "(0x%08x) ]\n", pid, si->name, (unsigned)tmp, extra_len);
@@ -2325,7 +2358,7 @@ static int link_image(soinfo *si, unsigned wr_offset)
         if (mprotect((void *) start, len, PROT_READ) < 0) {
             DL_ERR("%5d GNU_RELRO mprotect of library '%s' failed: %d (%s)\n",
                    pid, si->name, errno, strerror(errno));
-            goto fail;
+//            goto fail;
         }
     }
 
