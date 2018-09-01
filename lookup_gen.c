@@ -330,7 +330,7 @@ extern char send;if(!my_strcmp(name,"send"))return &send;
 extern char syscall;if(!my_strcmp(name,"syscall"))return &syscall;
 extern char __udivmoddi4;if(!my_strcmp(name,"__udivmoddi4"))return &__udivmoddi4;
 extern char __umoddi3;if(!my_strcmp(name,"__umoddi3"))return &__umoddi3;
-//extern char my__libc_start_main;if(!my_strcmp(name,"__libc_start_main"))return &my__libc_start_main;
+extern char my__libc_start_main;if(!my_strcmp(name,"__libc_start_main"))return &my__libc_start_main;
 
 return 0;
 }

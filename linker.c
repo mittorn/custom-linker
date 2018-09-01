@@ -798,7 +798,7 @@ verify_elf_object(void *base, const char *name)
  *         This indicates a pre-linked library.
  */
 static unsigned
-get_lib_extents(int fd, const char *name, void *__hdr, unsigned *total_sz)
+get_lib_extents(int fd, const char *name, void *__hdr, unsigned *total_sz, unsigned *is_dyn)
 {
     unsigned req_base;
     unsigned min_vaddr = 0xffffffff;
@@ -849,6 +849,9 @@ get_lib_extents(int fd, const char *name, void *__hdr, unsigned *total_sz)
     max_vaddr = (max_vaddr + PAGE_SIZE - 1) & ~PAGE_MASK;
 
     *total_sz = (max_vaddr - min_vaddr);
+    if( is_dyn )
+        *is_dyn = ehdr->e_type == ET_DYN;
+
     return (unsigned)req_base;
 }
 
@@ -1073,7 +1076,7 @@ load_segments(int fd, void *header, soinfo *si)
                 DL_ERR("%d invalid GNU_RELRO in '%s' "
                        "p_vaddr=0x%08x p_memsz=0x%08x", pid, si->name,
                        phdr->p_vaddr, phdr->p_memsz);
-                goto fail;
+//                goto fail;
             }
             si->gnu_relro_start = (Elf_Addr) (base + phdr->p_vaddr);
             si->gnu_relro_len = (unsigned) phdr->p_memsz;
@@ -1160,6 +1163,7 @@ load_library(const char *name)
     const char *bname;
     soinfo *si = NULL;
     Elf_Ehdr *hdr;
+    unsigned is_dyn;
 
     if(fd == -1) {
         DL_ERR("Library '%s' not found", name);
@@ -1180,7 +1184,7 @@ load_library(const char *name)
 
     /* Parse the ELF header and get the size of the memory footprint for
      * the library */
-    req_base = get_lib_extents(fd, name, &__header[0], &ext_sz);
+    req_base = get_lib_extents(fd, name, &__header[0], &ext_sz, &is_dyn);
     if (req_base == (unsigned)-1)
         goto fail;
     TRACE("[ %5d - '%s' (%s) wants base=0x%08x sz=0x%08x ]\n", pid, name,
@@ -1203,7 +1207,8 @@ load_library(const char *name)
     si->flags = 0;
     si->entry = 0;
     si->dynamic = (unsigned *)-1;
-    if (alloc_mem_region(si) < 0)
+
+    if (is_dyn &&alloc_mem_region(si) < 0)
         goto fail;
 
     TRACE("[ %5d allocated memory for %s @ %p (0x%08x) ]\n",
@@ -1217,8 +1222,11 @@ load_library(const char *name)
     /* this might not be right. Technically, we don't even need this info
      * once we go through 'load_segments'. */
     hdr = (Elf_Ehdr *)si->base;
-    si->phdr = (Elf_Phdr *)((unsigned char *)si->base + hdr->e_phoff);
-    si->phnum = hdr->e_phnum;
+    if( hdr )
+    {
+        si->phdr = (Elf_Phdr *)((unsigned char *)si->base + hdr->e_phoff);
+        si->phnum = hdr->e_phnum;
+    }
     /**/
 
     close(fd);
