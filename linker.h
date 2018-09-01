@@ -57,7 +57,9 @@ typedef Elf32_Half Elf_Half;
 typedef Elf32_Rel  Elf_Rel;
 typedef Elf32_Rela Elf_Rela;
 #endif
-
+#ifndef RTLD_NEXT
+#define RTLD_NEXT (unsigned long)-1
+#endif
 void debugger_init();
 const char *addr_to_name(unsigned addr);
 

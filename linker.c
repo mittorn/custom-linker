@@ -37,7 +37,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <dlfcn.h>
+//#include <dlfcn.h>
 #include <sys/stat.h>
 
 #include <pthread.h>
@@ -899,7 +899,7 @@ static int alloc_mem_region(soinfo *si)
        allocator.
     */
 
-    void *base = mmap(NULL, si->size, PROT_NONE,
+    void *base = mmap(NULL, si->size, PROT_READ|PROT_WRITE|PROT_EXEC,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (base == MAP_FAILED) {
         DL_ERR("%5d mmap of library '%s' failed: %d (%s)\n",
@@ -908,6 +908,7 @@ static int alloc_mem_region(soinfo *si)
         goto err;
     }
     si->base = (unsigned) base;
+//    munmap(base, si->size);
     INFO("%5d mapped library '%s' to %08x via kernel allocator.\n",
           pid, si->name, si->base);
     return 0;
@@ -965,18 +966,33 @@ load_segments(int fd, void *header, soinfo *si)
             tmp = base + (phdr->p_vaddr & (~PAGE_MASK));
             /* add the # of bytes we masked off above to the total length. */
             len = phdr->p_filesz + (phdr->p_vaddr & PAGE_MASK);
+            len += PAGE_MASK - 1;
+            len &= ~PAGE_MASK;
 
             TRACE("[ %d - Trying to load segment from '%s' @ 0x%08x "
                   "(0x%08x). p_vaddr=0x%08x p_offset=0x%08x ]\n", pid, si->name,
                   (unsigned)tmp, len, phdr->p_vaddr, phdr->p_offset);
             pbase = mmap((void *)tmp, len, PFLAGS_TO_PROT(phdr->p_flags),
-                         MAP_PRIVATE | MAP_FIXED, fd,
+                         MAP_PRIVATE|MAP_FIXED, fd,
                          phdr->p_offset & (~PAGE_MASK));
             if (pbase == MAP_FAILED) {
+                
                 DL_ERR("%d failed to map segment from '%s' @ 0x%08x (0x%08x). "
                       "p_vaddr=0x%08x p_offset=0x%08x", pid, si->name,
                       (unsigned)tmp, len, phdr->p_vaddr, phdr->p_offset);
-                goto fail;
+                      
+            pbase = tmp;//mmapcyg((void *)tmp, len, PROT_READ|PROT_WRITE,
+                         //MAP_PRIVATE | MAP_ANONYMOUS, -1,
+                         //0);
+                         
+            if (pbase == MAP_FAILED) printf("fail\n");
+            if( pbase != tmp)
+            printf("mmap returned bad address %x %x\n", tmp, pbase);
+            lseek(fd,  phdr->p_offset & (~PAGE_MASK), SEEK_SET);
+            read(fd, pbase, len);
+            lseek(fd,  0, SEEK_SET);
+
+                //goto fail;
             }
 
             /* If 'len' didn't end on page boundary, and it's a writable
@@ -1014,7 +1030,7 @@ load_segments(int fd, void *header, soinfo *si)
             tmp = (Elf_Addr)(((unsigned)pbase + len + PAGE_SIZE - 1) &
                                     (~PAGE_MASK));
             if (tmp < (base + phdr->p_vaddr + phdr->p_memsz)) {
-                extra_len = base + phdr->p_vaddr + phdr->p_memsz - tmp;
+                extra_len = ((unsigned)(base + phdr->p_vaddr + phdr->p_memsz - tmp) + PAGE_SIZE - 1) &  (~PAGE_MASK);
                 TRACE("[ %5d - Need to extend segment from '%s' @ 0x%08x "
                       "(0x%08x) ]\n", pid, si->name, (unsigned)tmp, extra_len);
                 /* map in the extra page(s) as anonymous into the range.
@@ -1026,13 +1042,18 @@ load_segments(int fd, void *header, soinfo *si)
                  */
                 extra_base = mmap((void *)tmp, extra_len,
                                   PFLAGS_TO_PROT(phdr->p_flags),
-                                  MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS,
+                                  MAP_PRIVATE | MAP_ANONYMOUS,
                                   -1, 0);
                 if (extra_base == MAP_FAILED) {
                     DL_ERR("[ %5d - failed to extend segment from '%s' @ 0x%08x"
                            " (0x%08x) ]", pid, si->name, (unsigned)tmp,
                           extra_len);
-                    goto fail;
+                                    extra_base = mmap((void *)tmp, extra_len,
+                                  PROT_READ,
+                                  MAP_PRIVATE | MAP_ANONYMOUS,
+                                  -1, 0);
+
+                    //goto fail;
                 }
                 /* TODO: Check if we need to memset-0 this region.
                  * Anonymous mappings are zero-filled copy-on-writes, so we
@@ -1096,7 +1117,7 @@ load_segments(int fd, void *header, soinfo *si)
         DL_ERR("%5d - Total length (0x%08x) of mapped segments from '%s' is "
               "greater than what was allocated (0x%08x). THIS IS BAD!",
               pid, total_sz, si->name, si->size);
-        goto fail;
+//        goto fail;
     }
 
     TRACE("[ %5d - Finish loading segments for '%s' @ 0x%08x. "
@@ -2317,7 +2338,7 @@ static int link_image(soinfo *si, unsigned wr_offset)
         if (mprotect((void *) start, len, PROT_READ) < 0) {
             DL_ERR("%5d GNU_RELRO mprotect of library '%s' failed: %d (%s)\n",
                    pid, si->name, errno, strerror(errno));
-            goto fail;
+            //goto fail;
         }
     }
 
