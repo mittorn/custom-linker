@@ -16,7 +16,17 @@
 
 #include "config.h"
 
-#include <dlfcn.h>
+//#include <dlfcn.h>
+typedef struct
+{
+  const char *dli_fname;        /* File name of defining object.  */
+  void *dli_fbase;              /* Load address of that object.  */
+  const char *dli_sname;        /* Name of nearest symbol.  */
+  void *dli_saddr;              /* Exact value of nearest symbol.  */
+} Dl_info;
+# define RTLD_DEFAULT   ((void *) 0)
+
+
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>

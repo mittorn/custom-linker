@@ -35,7 +35,7 @@
 #include <ctype.h>
 #include <signal.h>
 #include <sys/mman.h>
-#include <sys/prctl.h>
+//#include <sys/prctl.h>
 #include <errno.h>
 
 #include "linker.h"
@@ -147,7 +147,7 @@ static void logSignalSummary(int signum, const siginfo_t* info)
         case SIGBUS:    signame = "SIGBUS";     break;
         case SIGFPE:    signame = "SIGFPE";     break;
         case SIGSEGV:   signame = "SIGSEGV";    break;
-        case SIGSTKFLT: signame = "SIGSTKFLT";  break;
+//        case SIGSTKFLT: signame = "SIGSTKFLT";  break;
         case SIGPIPE:   signame = "SIGPIPE";    break;
         default:        signame = "???";        break;
     }
@@ -257,6 +257,6 @@ void debugger_init()
     sigaction(SIGBUS, &act, NULL);
     sigaction(SIGFPE, &act, NULL);
     sigaction(SIGSEGV, &act, NULL);
-    sigaction(SIGSTKFLT, &act, NULL);
+//    sigaction(SIGSTKFLT, &act, NULL);
     sigaction(SIGPIPE, &act, NULL);
 }
