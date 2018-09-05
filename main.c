@@ -25,8 +25,13 @@ int main(int argc, const char **argv, const char ** envp)
 	}
 	android_linker_init(9,lookup_libc);
 	soinfo *lib = find_library(argv[1]);
+	if( !lib )
+	{
+	    printf("Failed to load %s: %s\n", argv[1], android_dlerror());
+	    return 1;
+	}
 	call_constructors_recursive(lib);
-	Elf_Sym *sym = lookup("main", 0, 0);
+//	Elf_Sym *sym = lookup("main", 0, 0);
 	void (*start)(long *) = lib->base + lib->entry;
 	g_argc = argc;
 	g_envp = envp;
